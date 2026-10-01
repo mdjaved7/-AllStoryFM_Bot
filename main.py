@@ -649,7 +649,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 message_id=res['message_id']
             )
                 except Exception:
-            pass
+         pass
 
     registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
     
