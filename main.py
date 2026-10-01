@@ -583,19 +583,20 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     if file_obj:
         stored_msg_id = None
         
-                # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
+                        # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             try:
-                # Direct forward ke liye:
-                # stored_msg = await message.forward(chat_id=PRIVATE_STORE_ID)
+                # Flood wait se bachne ke liye chota delay
+                await asyncio.sleep(1.5)
                 
-                # Bina forwarded tag ke save karne ke liye (recommended):
+                # Bina forwarded tag ke save karne ke liye:
                 stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                 
                 # Agar save karne ke baad uska ID ya link chahiye:
                 store_message_id = stored_msg.id
             except Exception as e:
                 print(f"Error saving to private store: {e}")
+
 
         file_size = getattr(file_obj, 'file_size', 0)
         file_item = {
