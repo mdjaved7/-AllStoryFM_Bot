@@ -558,7 +558,7 @@ async def process_batch_generation(message, context, user_id, chunk_size):
 async def wait_and_send_final_notification(chat_id, user_id, context):
     # Jab tak pichhli file store hue pure 8 second nahi guzar jate, loop chalega
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(400.00)
         time_since_last_file = time.time() - last_file_received_time.get(user_id, 0)
         if time_since_last_file >= 8.0:
             break
@@ -608,7 +608,7 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         if PRIVATE_STORE_ID != 0:
             while True:
                 try:
-                    await asyncio.sleep(1.5)
+                    await asyncio.sleep(0.5)
                     stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                     stored_msg_id = stored_msg.message_id
                     break
