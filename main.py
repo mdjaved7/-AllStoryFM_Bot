@@ -539,7 +539,7 @@ async def process_batch_generation(message, context, user_id, chunk_size):
         })
         registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
         
-        link = f"https://t.me/{bot_info.username}?start={batch_key}"
+        link = f"https://t.me/ - style:red{bot_info.username}?start={batch_key}"
         line = f"✅ 🇮🇳 Hindi Ep {start_ep} x {end_ep} - {link}"
         response_lines.append(line)
         await asyncio.sleep(0.05)
