@@ -7,6 +7,7 @@ import urllib.parse
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import FloodWait
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
@@ -151,7 +152,7 @@ def get_cooldown_message(remaining_time, user_first_name):
     return msg, markup
 
 def get_plan_menu_message():
-    msg = ("👑 **पास सब्सक्रिप्शन प्लान्स V2** 👑\n\n⚡️️ पास के मुख्य फायदे:\n"
+    msg = ("👑 **पास सब्सक्रिप्शन प्लान्स V2** 👑\n\n⚡ पास के मुख्य फायदे:\n"
            "• ⓧ कोई डोनेशन मैसेज नहीं: बिना किसी डोनेशन मैसेज के 100% क्लीन एक्सपीरियंस।\n"
            "• ♾ कोई एक्सेस लिमिट नहीं: बिना किसी कूलडाउन के सभी ऑडियो/फाइल्स लगातार सुनें।\n\n👇 नीचे अपना पसंदीदा पास प्लान चुनें:")
     buttons = []
@@ -583,123 +584,6 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     if file_obj:
         stored_msg_id = None
         
-                                # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
-        if PRIVATE_STORE_ID != 0:
-            try:
-                # Telegram flood wait se bachne ke liye chota delay
-                await asyncio.sleep(30.0)
-                
-                # Bina forwarded tag ke save karne ke liye:
-                stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
-                
-                # Sahi attribute '.message_id' hai (.id nahi)
-                store_message_id = stored_msg.message_id
-            except Exception as e:
-                print(f"Error saving to private store: {e}")
-
-
-            file_size = getattr(file_obj, 'file_size', 0)
-    file_item = {
-        "file_id": file_obj.file_id,
-        "file_type": file_type,
-        "file_name": file_name,
-        "file_size": file_size,
-        "caption": caption,
-        "channel_message_id": stored_msg_id
-    }
-
-    if user_id not in user_queues:
-        user_queues[user_id] = []
-    user_queues[user_id].append(file_item)
-    
-    await update.message.reply_text(
-        "✅ Batch stored! Now send /getlink command to get the shareable batch link."
-    )
-
-
-async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if len(text) < 3:
-        return
-
-    if not has_active_pass(user_id):
-        is_allowed, remaining_time = check_and_update_free_access(user_id)
-        if not is_allowed:
-            msg, markup = get_cooldown_message(remaining_time, update.effective_user.first_name)
-            await update.message.reply_text(msg, reply_markup=markup)
-            return
-
-    search_msg = await update.message.reply_text("🔍 फाइल खोजी जा रही है...")
-    results = list(global_files_col.find({"caption": {"$regex": text, "$options": "i"}}).limit(5))
-
-                        if not results:
-        await search_msg.edit_text("❌ कोई फाइल नहीं मिली!")
-        return
-
-    await search_msg.delete()
-    for res in results:
-        try:
-            await context.bot.copy_message(
-                chat_id=update.message.chat_id,
-                from_chat_id=res['chat_id'],
-                message_id=res['message_id']
-            )
-        except Exception:
-            pass
-
-    registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
-    
-    link = f"https://t.me/{bot_info.username}?start={batch_key}"
-    line = f"✅ 🇮🇳 Hindi Ep {start_ep} x {end_ep} - {link}"
-    response_lines.append(line)
-    await asyncio.sleep(0.05)
-
-    backup_queues.pop(user_id, None)
-
-    final_output = "\n\n".join(response_lines)
-
-    if len(final_output) > 4000:
-        for i in range(0, len(response_lines), 10):
-            batch_part = "\n\n".join(response_lines[i:i + 10])
-            await message.reply_text(batch_part, disable_web_page_preview=True)
-    else:
-        await message.reply_text(final_output, disable_web_page_preview=True)
-
-async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        if update.message.photo:
-            await handle_user_screenshot(update, context)
-        return
-
-    file_obj = None
-    file_type = None
-    file_name = ""
-    caption = update.message.caption or ""
-
-    if update.message.photo:
-        file_obj = update.message.photo[-1]
-        file_type = "photo"
-    elif update.message.audio:
-        file_obj = update.message.audio
-        file_type = "audio"
-        file_name = file_obj.file_name or ""
-    elif update.message.document:
-        file_obj = update.message.document
-        file_type = "document"
-        file_name = file_obj.file_name or ""
-    elif update.message.video:
-        file_obj = update.message.video
-        file_type = "video"
-        file_name = file_obj.file_name or ""
-
-    if file_obj:
-        stored_msg_id = None
-
         # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             while True:
@@ -739,7 +623,6 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(
             "✅ Batch stored! Now send /getlink command to get the shareable batch link."
         )
-
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
