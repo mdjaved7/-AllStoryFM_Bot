@@ -92,6 +92,7 @@ user_queues = {}
 backup_queues = {}
 cancel_status = {}
 processing_tasks = {}
+notify_tasks = {}
 
 def get_active_file_db():
     config = config_col.find_one({"_id": "file_db_config"})
@@ -553,6 +554,20 @@ async def process_batch_generation(message, context, user_id, chunk_size):
     else:
         await message.reply_text(final_output, disable_web_page_preview=True)
 
+async def notify_user_batch_ready(chat_id, user_id, context):
+    # User jab files bhejna stop karega, 3 second wait karke sirf 1 baar message bhejega
+    await asyncio.sleep(3.0)
+    total_count = len(user_queues.get(user_id, []))
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ **Total {total_count} files private channel me store ho gayi hain!**\n\nAb shareable batch link banane ke liye `/getlink` command bhejein.",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+    notify_tasks.pop(user_id, None)
+
 async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
@@ -620,8 +635,12 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
             user_queues[user_id] = []
         user_queues[user_id].append(file_item)
         
-        await update.message.reply_text(
-            "✅ Batch stored! Now send /getlink command to get the shareable batch link."
+        # Har file par reply nahi aayega, saari files save hone ke baad ek hi baar aayega
+        if user_id in notify_tasks:
+            notify_tasks[user_id].cancel()
+
+        notify_tasks[user_id] = asyncio.create_task(
+            notify_user_batch_ready(update.message.chat_id, user_id, context)
         )
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
