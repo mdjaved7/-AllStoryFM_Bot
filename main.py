@@ -151,7 +151,7 @@ def get_cooldown_message(remaining_time, user_first_name):
     return msg, markup
 
 def get_plan_menu_message():
-    msg = ("👑 **पास सब्सक्रिप्शन प्लान्स V2** 👑\n\n⚡️ पास के मुख्य फायदे:\n"
+    msg = ("👑 **पास सब्सक्रिप्शन प्लान्स V2** 👑\n\n⚡️️ पास के मुख्य फायदे:\n"
            "• ⓧ कोई डोनेशन मैसेज नहीं: बिना किसी डोनेशन मैसेज के 100% क्लीन एक्सपीरियंस।\n"
            "• ♾ कोई एक्सेस लिमिट नहीं: बिना किसी कूलडाउन के सभी ऑडियो/फाइल्स लगातार सुनें।\n\n👇 नीचे अपना पसंदीदा पास प्लान चुनें:")
     buttons = []
@@ -308,8 +308,10 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
 
 def extract_ep_number(file_item):
-    text = file_item.get('file_name', '') or file_item.get('caption', '')
-    match = re.search(r'(?:ep|episode|भाग|part)?\s*(\d+)', text, re.IGNORECASE)
+    text = file_item.get('caption', '') or file_item.get('file_name', '')
+    if not text:
+        return None
+    match = re.search(r'(?:ep|episode|भाग|part|\b)\s*(\d+)', text, re.IGNORECASE)
     if match:
         return int(match.group(1))
     return None
@@ -340,7 +342,6 @@ async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_
     # --- BATCH SIZE BUTTON SELECTION ---
     if data.startswith("set_batch_"):
         total_files = int(data.split("_")[2])
-        # 1 फोटो होती है, बाकी ऑडियो/अन्य फाइल्स
         audio_chunk_size = total_files - 1
         await query.answer(f"{total_files} फाइल्स का बैच चुना गया!")
         await query.message.edit_text(f"⏳ **{total_files} फाइल्स का बैच बनाया जा रहा है... कृपया प्रतीक्षा करें।**", parse_mode="Markdown")
@@ -370,7 +371,7 @@ async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_
             f"1. ऊपर दिए गए QR कोड को Google Pay, PhonePe, Paytm से स्कैन करें।\n"
             f"2. पूरे **₹{plan['price']}** का भुगतान करें।\n"
             f"3. पेमेंट के बाद, **यहीं पर स्क्रीनशॉट (फोटो) भेजें**।\n\n"
-            f"⚠️️ **स्क्रीनशॉट भेजते ही आपका पास चेक करके एक्टिवेट कर दिया जाएगा।**"
+            f"⚠ **स्क्रीनशॉट भेजते ही आपका पास चेक करके एक्टिवेट कर दिया जाएगा।**"
         )
 
         markup = InlineKeyboardMarkup([
@@ -470,11 +471,13 @@ async def handle_user_screenshot(update: Update, context: ContextTypes.DEFAULT_T
 
 async def get_link_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return
+
     if user_id not in user_queues or not user_queues[user_id]:
         await update.message.reply_text("❌ आपकी कतार (Queue) में कोई फाइल्स नहीं हैं। कृपया पहले फाइल्स भेजें।")
         return
 
-    # यूजर से बैच साइज चुनने के लिए 4 बटन
     buttons = [
         [
             InlineKeyboardButton("📦 6 फाइल्स (1 Photo + 5 Audio)", callback_data="set_batch_6"),
@@ -521,6 +524,8 @@ async def process_batch_generation(message, context, user_id, chunk_size):
             start_ep = base_counter
             end_ep = base_counter + len(chunk) - 1
             base_counter = end_ep + 1
+        else:
+            base_counter = end_ep + 1
 
         batch_key = f"batch_{int(time.time())}_{idx+1}"
         
@@ -557,7 +562,6 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     file_obj = None
     file_type = None
     file_name = ""
-    file_size = 0
     caption = update.message.caption or ""
 
     if update.message.photo:
@@ -577,13 +581,34 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         file_name = file_obj.file_name or ""
 
     if file_obj:
+        stored_msg_id = None
+        
+        # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
+        if PRIVATE_STORE_ID != 0:
+            try:
+                forwarded = await update.message.copy(chat_id=PRIVATE_STORE_ID)
+                stored_msg_id = forwarded.message_id
+                
+                # Global search database mein save karein
+                if caption or file_name:
+                    search_title = caption if caption else file_name
+                    global_files_col.insert_one({
+                        "chat_id": PRIVATE_STORE_ID,
+                        "message_id": stored_msg_id,
+                        "caption": search_title,
+                        "file_type": file_type
+                    })
+            except Exception as e:
+                print(f"Private store error: {e}")
+
         file_size = getattr(file_obj, 'file_size', 0)
         file_item = {
             "file_id": file_obj.file_id,
             "file_type": file_type,
             "file_name": file_name,
             "file_size": file_size,
-            "caption": caption
+            "caption": caption,
+            "channel_message_id": stored_msg_id
         }
 
         if user_id not in user_queues:
@@ -615,11 +640,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await search_msg.delete()
     for res in results:
-        await context.bot.copy_message(
-            chat_id=update.message.chat_id,
-            from_chat_id=res['chat_id'],
-            message_id=res['message_id']
-        )
+        try:
+            await context.bot.copy_message(
+                chat_id=update.message.chat_id,
+                from_chat_id=res['chat_id'],
+                message_id=res['message_id']
+            )
+        except Exception: pass
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_query=None):
     user = direct_query.from_user if direct_query else update.effective_user
