@@ -583,17 +583,17 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     if file_obj:
         stored_msg_id = None
         
-                        # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
+                                # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             try:
-                # Flood wait se bachne ke liye chota delay
+                # Telegram flood wait se bachne ke liye chota delay
                 await asyncio.sleep(1.5)
                 
                 # Bina forwarded tag ke save karne ke liye:
                 stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                 
-                # Agar save karne ke baad uska ID ya link chahiye:
-                store_message_id = stored_msg.id
+                # Sahi attribute '.message_id' hai (.id nahi)
+                store_message_id = stored_msg.message_id
             except Exception as e:
                 print(f"Error saving to private store: {e}")
 
