@@ -92,7 +92,8 @@ user_queues = {}
 backup_queues = {}
 cancel_status = {}
 processing_tasks = {}
-notify_tasks = {}
+last_file_received_time = {}
+notify_running_tasks = {}
 
 def get_active_file_db():
     config = config_col.find_one({"_id": "file_db_config"})
@@ -303,7 +304,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(send_files_logic(update, context, start_param))
         return
         
-    await update.message.reply_text("🗄️ Welcome! Type a file name to search, or send /plan to buy subscription! 🎯🔥")
+    await update.message.reply_text("🗄️️ Welcome! Type a file name to search, or send /plan to buy subscription! 🎯🔥")
 
 async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, markup = get_plan_menu_message()
@@ -554,19 +555,23 @@ async def process_batch_generation(message, context, user_id, chunk_size):
     else:
         await message.reply_text(final_output, disable_web_page_preview=True)
 
-async def notify_user_batch_ready(chat_id, user_id, context):
-    # User jab files bhejna stop karega, 3 second wait karke sirf 1 baar message bhejega
-    await asyncio.sleep(3.0)
-    total_count = len(user_queues.get(user_id, []))
+async def wait_and_send_final_notification(chat_id, user_id, context):
+    # Jab tak pichhli file store hue pure 8 second nahi guzar jate, loop chalega
+    while True:
+        await asyncio.sleep(2.0)
+        time_since_last_file = time.time() - last_file_received_time.get(user_id, 0)
+        if time_since_last_file >= 8.0:
+            break
+
     try:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ **Total {total_count} files private channel me store ho gayi hain!**\n\nAb shareable batch link banane ke liye `/getlink` command bhejein.",
-            parse_mode="Markdown"
+            text="✅ Batch stored! Now send /getlink command to get the shareable batch link."
         )
     except Exception:
         pass
-    notify_tasks.pop(user_id, None)
+    finally:
+        notify_running_tasks.pop(user_id, None)
 
 async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -634,14 +639,15 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         if user_id not in user_queues:
             user_queues[user_id] = []
         user_queues[user_id].append(file_item)
-        
-        # Har file par reply nahi aayega, saari files save hone ke baad ek hi baar aayega
-        if user_id in notify_tasks:
-            notify_tasks[user_id].cancel()
 
-        notify_tasks[user_id] = asyncio.create_task(
-            notify_user_batch_ready(update.message.chat_id, user_id, context)
-        )
+        # Har successful file save hone par latest timestamp update hoga
+        last_file_received_time[user_id] = time.time()
+
+        # Agar tracker pehle se run nahi ho raha, toh start karein
+        if user_id not in notify_running_tasks or notify_running_tasks[user_id].done():
+            notify_running_tasks[user_id] = asyncio.create_task(
+                wait_and_send_final_notification(update.message.chat_id, user_id, context)
+            )
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
