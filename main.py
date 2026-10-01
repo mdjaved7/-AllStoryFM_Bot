@@ -608,7 +608,7 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         if PRIVATE_STORE_ID != 0:
             while True:
                 try:
-                    await asyncio.sleep(1.5)
+                    await asyncio.sleep(30)
                     stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                     stored_msg_id = stored_msg.message_id
                     break
