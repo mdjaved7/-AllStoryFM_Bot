@@ -590,7 +590,7 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
                 # stored_msg = await message.forward(chat_id=PRIVATE_STORE_ID)
                 
                 # Bina forwarded tag ke save karne ke liye (recommended):
-                stored_msg = await message.copy(chat_id=PRIVATE_STORE_ID)
+                stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                 
                 # Agar save karne ke baad uska ID ya link chahiye:
                 store_message_id = stored_msg.id
