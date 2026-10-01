@@ -583,23 +583,19 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     if file_obj:
         stored_msg_id = None
         
-        # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
+                # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             try:
-                forwarded = await update.message.copy(chat_id=PRIVATE_STORE_ID)
-                stored_msg_id = forwarded.message_id
+                # Direct forward ke liye:
+                # stored_msg = await message.forward(chat_id=PRIVATE_STORE_ID)
                 
-                # Global search database mein save karein
-                if caption or file_name:
-                    search_title = caption if caption else file_name
-                    global_files_col.insert_one({
-                        "chat_id": PRIVATE_STORE_ID,
-                        "message_id": stored_msg_id,
-                        "caption": search_title,
-                        "file_type": file_type
-                    })
+                # Bina forwarded tag ke save karne ke liye (recommended):
+                stored_msg = await message.copy(chat_id=PRIVATE_STORE_ID)
+                
+                # Agar save karne ke baad uska ID ya link chahiye:
+                store_message_id = stored_msg.id
             except Exception as e:
-                print(f"Private store error: {e}")
+                print(f"Error saving to private store: {e}")
 
         file_size = getattr(file_obj, 'file_size', 0)
         file_item = {
