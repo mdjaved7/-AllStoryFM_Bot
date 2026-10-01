@@ -307,12 +307,20 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg, markup = get_plan_menu_message()
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
 
+def extract_ep_number(file_item):
+    text = file_item.get('file_name', '') or file_item.get('caption', '')
+    match = re.search(r'(?:ep|episode|भाग|part)?\s*(\d+)', text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
 async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
+    user_id = query.from_user.id
     
     if data == "cancel_action":
-        cancel_status[query.from_user.id] = True 
+        cancel_status[user_id] = True 
         try: await query.message.delete()
         except: pass
         await query.answer("❌ Files bhejna rok diya gaya hai.")
@@ -327,6 +335,16 @@ async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_
     if data == "my_transactions":
         await query.answer("Profile fetching...")
         await user_profile(update, context, direct_query=query)
+        return
+
+    # --- BATCH SIZE BUTTON SELECTION ---
+    if data.startswith("set_batch_"):
+        total_files = int(data.split("_")[2])
+        # 1 फोटो होती है, बाकी ऑडियो/अन्य फाइल्स
+        audio_chunk_size = total_files - 1
+        await query.answer(f"{total_files} फाइल्स का बैच चुना गया!")
+        await query.message.edit_text(f"⏳ **{total_files} फाइल्स का बैच बनाया जा रहा है... कृपया प्रतीक्षा करें।**", parse_mode="Markdown")
+        await process_batch_generation(query.message, context, user_id, audio_chunk_size)
         return
 
     if data.startswith("buy_plan_"):
@@ -352,7 +370,7 @@ async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_
             f"1. ऊपर दिए गए QR कोड को Google Pay, PhonePe, Paytm से स्कैन करें।\n"
             f"2. पूरे **₹{plan['price']}** का भुगतान करें।\n"
             f"3. पेमेंट के बाद, **यहीं पर स्क्रीनशॉट (फोटो) भेजें**।\n\n"
-            f"⚠️ **स्क्रीनशॉट भेजते ही आपका पास चेक करके एक्टिवेट कर दिया जाएगा।**"
+            f"⚠️️ **स्क्रीनशॉट भेजते ही आपका पास चेक करके एक्टिवेट कर दिया जाएगा।**"
         )
 
         markup = InlineKeyboardMarkup([
@@ -379,22 +397,22 @@ async def handle_callback_queries(update: Update, context: ContextTypes.DEFAULT_
             return
 
         plan = PLANS[tx['plan_id']]
-        user_id = tx['user_id']
+        target_uid = tx['user_id']
         current_time = time.time()
-        user_data = user_col.find_one({"user_id": user_id})
+        user_data = user_col.find_one({"user_id": target_uid})
         current_validity = user_data.get("pass_validity", 0) if user_data else 0
         if current_validity < current_time: current_validity = current_time 
 
         new_validity = current_validity + (plan['days'] * 86400) 
         exact_expiry_date = datetime.fromtimestamp(new_validity, ZoneInfo("Asia/Kolkata")).strftime('%d/%m/%Y | %I:%M:%S %p')
 
-        user_col.update_one({"user_id": user_id}, {"$set": {"pass_validity": new_validity}})
+        user_col.update_one({"user_id": target_uid}, {"$set": {"pass_validity": new_validity}})
         transactions_col.update_one({"_id": tx["_id"]}, {"$set": {"status": "success", "completed_at": datetime.now(ZoneInfo("Asia/Kolkata")).strftime('%d/%m/%Y | %I:%M %p')}})
 
         await query.message.edit_caption(caption=query.message.caption + "\n\n✅ **APPROVED BY ADMIN**", parse_mode="Markdown")
         try:
             await context.bot.send_message(
-                chat_id=user_id,
+                chat_id=target_uid,
                 text=f"✅ **पेमेंट सफल रहा!**\nआपका {plan['name']} का पास एक्टिवेट कर दिया गया है।\n⏰ **समाप्ति समय:** `{exact_expiry_date}`\n\nअब आप सभी फाइल्स एक्सेस कर सकते हैं।",
                 parse_mode="Markdown"
             )
@@ -439,239 +457,63 @@ async def handle_user_screenshot(update: Update, context: ContextTypes.DEFAULT_T
     ])
 
     admin_caption = (
-        f"📩 **नया पेमेंट वेरिफिकेशन अनुरोध!**\n\n"
-        f"👤 यूजर: {update.effective_user.first_name} (@{update.effective_user.username})\n"
-        f"🆔 User ID: `{user_id}`\n"
-        f"🔖 Order ID: `{pending_tx['order_id']}`\n"
-        f"👑 प्लान: {plan.get('name')} (₹{plan.get('price')})\n\n"
-        f"कृपया अपने बैंक/UPI में जांचें और नीचे से अप्रूव या रिजेक्ट करें:"
+        f"🔔 **नया पेमेंट वेरिफिकेशन प्राप्त हुआ!**\n\n"
+        f"👤 **यूजर:** {update.effective_user.full_name} (`{user_id}`)\n"
+        f"👑 **प्लान:** {plan.get('name', 'N/A')} (₹{pending_tx['amount']})\n"
+        f"🆔 **ऑर्डर ID:** `{pending_tx['order_id']}`"
     )
 
-    for admin in ADMIN_IDS:
+    for aid in ADMIN_IDS:
         try:
-            await context.bot.send_photo(chat_id=admin, photo=photo_file_id, caption=admin_caption, parse_mode="Markdown", reply_markup=admin_markup)
+            await context.bot.send_photo(chat_id=aid, photo=photo_file_id, caption=admin_caption, parse_mode="Markdown", reply_markup=admin_markup)
         except Exception: pass
 
-async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_query=None):
-    user_id = update.effective_user.id
-    user_data = user_col.find_one({"user_id": user_id})
-    validity = user_data.get("pass_validity", 0) if user_data else 0
-    status_text = f"🟢 सक्रिय (वैधता: {datetime.fromtimestamp(validity, ZoneInfo('Asia/Kolkata')).strftime('%d-%m-%Y %I:%M:%S %p')})" if time.time() < validity else "🔴 निष्क्रिय (कृपया पास खरीदें)"
-
-    msg = f"📜 मेरे ट्रांसक्शन्स और पास स्थिति\n──────────────────────\nयूजर: {update.effective_user.first_name} ({user_id})\nपास स्थिति: {status_text}\n──────────────────────\nहाल के लेनदेन:\n\n"
-    txs = list(transactions_col.find({"user_id": user_id, "status": "success"}).sort("date", -1).limit(3))
-    
-    if not txs: msg += "कोई हालिया लेनदेन नहीं मिला।"
-    else:
-        for i, tx in enumerate(txs, 1):
-            plan_name = PLANS.get(tx.get('plan_id'), {}).get('name', 'Unknown')
-            date_str = tx.get('completed_at', tx['date'].strftime('%d/%m/%Y | %I:%M %p'))
-            msg += f"┄┄┄┄┄┄┄┄┄┄┄ {i} ┄┄┄┄┄┄┄┄┄┄\n\n🆔 ऑर्डर:- {tx['order_id']}\n👑 प्लान:- {plan_name} (₹{tx['amount']})\n💳 पेमेंट मोड:- Direct UPI\n📊 स्थिति:- ✅ ( पेड )\n📅 तारीख:- {date_str}\n\n"
-
-    if direct_query: await direct_query.message.reply_text(msg)
-    else: await update.message.reply_text(msg)
-
-async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    if len(text) < 3:
-        return 
-        
-    if not has_active_pass(user_id):
-        is_allowed, remaining_time = check_and_update_free_access(user_id)
-        if not is_allowed:
-            msg, markup = get_cooldown_message(remaining_time, update.effective_user.first_name)
-            await update.message.reply_text(msg, reply_markup=markup)
-            return
-
-    search_msg = await update.message.reply_text("🔍 फाइल खोजी जा रही है...")
-    results = list(global_files_col.find({"caption": {"$regex": text, "$options": "i"}}).limit(5))
-    
-    if not results:
-        await search_msg.edit_text(f"❌ '{text}' से जुड़ी कोई फाइल नहीं मिली।")
-        return
-        
-    await search_msg.edit_text(f"✅ '{text}' से जुड़ी फाइल्स भेजी जा रही हैं...")
-    sent_msg_ids = [search_msg.message_id]
-    
-    for file in results:
-        try:
-            readable_size = get_readable_size(file.get('file_size', 0))
-            original_caption = file.get('caption', '')
-            if file['file_type'] == 'photo':
-                custom_caption = original_caption if original_caption else ">> JOIN > @AllstoryFM2 🔥"
-            elif file['file_type'] == 'video' and original_caption:
-                custom_caption = f"{original_caption}\n\n👉 FILE SIZE :- {readable_size} 👑\n>> JOIN > @AllstoryFM2 🔥"
-            else:
-                custom_caption = f">> JOIN > @AllstoryFM2 🔥\n✅✨\n\n👉 FILE SIZE :- {readable_size} 👑\n🔥"
-            
-            sent_msg = None
-            if file['file_type'] == 'document': sent_msg = await context.bot.send_document(update.message.chat_id, file['file_id'], protect_content=True, caption=custom_caption)
-            elif file['file_type'] == 'video': sent_msg = await context.bot.send_video(update.message.chat_id, file['file_id'], protect_content=True, caption=custom_caption)
-            elif file['file_type'] == 'photo': sent_msg = await context.bot.send_photo(update.message.chat_id, file['file_id'], protect_content=True, caption=custom_caption)
-            elif file['file_type'] == 'audio': sent_msg = await context.bot.send_audio(update.message.chat_id, file['file_id'], protect_content=True, caption=custom_caption)
-            if sent_msg: sent_msg_ids.append(sent_msg.message_id)
-            await asyncio.sleep(0.5) 
-        except Exception: pass
-
-    if sent_msg_ids:
-        try: delete_col.insert_one({"chat_id": update.message.chat_id, "message_ids": sent_msg_ids, "delete_at": time.time() + 14400})
-        except: pass
-
-    alert_text = "𝙷𝙸𝙽𝙳𝙸 𝚂𝚃𝙾𝚁𝚈\n❤️ 𝙷𝙴𝚈 𝙱𝚁𝙾 🇮🇳 \n\n📂 𝙵𝙸𝙻𝙴𝚂 𝚆𝙸𝙻𝙻 𝙱𝙴 𝙳𝙴𝙻𝙴𝚃𝙴𝙳 \n𝙰𝙵𝚃𝙴𝚁 [ 4 𝙷𝙾𝚄𝚁𝚂 ] 𝙿𝙻𝙴𝙰𝚂𝙴 \n𝚂𝙰𝚅𝙴 𝚃𝙷𝙴𝙼 𝚂𝙾𝙼𝙴𝚆𝙷𝙴𝚁𝙴 𝚂𝙰𝙵𝙴."
-    try:
-        final_msg = await context.bot.send_photo(
-            chat_id=update.message.chat_id, photo=DELETE_ALERT_IMAGE_URL, caption=alert_text, parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📟 UPDATE CHANNEL", url=CHANNEL_INVITE_LINK)]])
-        )
-        delete_col.insert_one({"chat_id": update.message.chat_id, "message_ids": [final_msg.message_id], "delete_at": time.time() + 14400})
-    except: pass
-
-async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    if len(context.args) < 3: return await update.message.reply_text("❌ Format: `/addchannel <ID> <Link> <Title>`", parse_mode="Markdown")
-    try:
-        fsub_col.update_one({"channel_id": int(context.args[0])}, {"$set": {"invite_link": context.args[1], "title": " ".join(context.args[2:])}}, upsert=True)
-        await update.message.reply_text("✅ Channel Added!")
-    except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
-
-async def del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    if not context.args: return
-    try:
-        fsub_col.delete_one({"channel_id": int(context.args[0])})
-        await update.message.reply_text("✅ Channel removed.")
-    except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
-
-async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    channels = list(fsub_col.find())
-    msg = "📢 <b>Active Force Join Channels:</b>\n\n"
-    for idx, ch in enumerate(channels, 1): msg += f"{idx}. <b>{ch.get('title')}</b>\n🆔 <code>{ch.get('channel_id')}</code>\n🔗 {ch.get('invite_link')}\n\n"
-    await update.message.reply_text(msg if channels else "📁 Empty.", parse_mode="HTML")
-
-async def check_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    try:
-        logs = list(history_col.find().sort("_id", -1).limit(15))
-        await update.message.reply_text("📊 Recent Logs:\n\n" + "".join([f"👤 {e.get('first_name')}\n📥 {e.get('batch_key')}\n⏰ {e.get('time')}\n\n" for e in logs]))
-    except: pass
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    active_db, active_name = get_active_file_db()
-    try:
-        stats_cmd = active_db.command("dbStats")
-        storage_mb = stats_cmd.get("storageSize", stats_cmd.get("dataSize", 0)) / (1024 * 1024)
-        storage_text = f"{storage_mb:.2f} MB ({active_name})"
-    except: storage_text = "Unavailable"
-    await update.message.reply_text(f"👥 Total Users: {user_col.count_documents({})}\n📥 Requests: {history_col.count_documents({})}\n🗄️ Storage: {storage_text}")
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    if not context.args and not update.message.reply_to_message: return
-    await update.message.reply_text("📢 Broadcast shuru ho raha hai...")
-    success = failed = 0
-    for user in user_col.find():
-        try:
-            if update.message.reply_to_message: await context.bot.copy_message(user['user_id'], update.message.chat_id, update.message.reply_to_message.message_id)
-            else: await context.bot.send_message(user['user_id'], " ".join(context.args))
-            success += 1
-            await asyncio.sleep(0.05)
-        except: failed += 1
-    await update.message.reply_text(f"✅ Complete!\n🟢 Success: {success}\n🔴 Failed: {failed}")
-
-async def process_batch_queue(user_id, context, message):
-    await asyncio.sleep(15)
-    if user_id not in user_queues: return
-    raw_files = user_queues.pop(user_id)
-    saved_files = []
-    
-    for msg in raw_files:
-        if not msg: continue
-        file_obj = msg.document or msg.video or (msg.photo[-1] if msg.photo else None) or msg.audio
-        if file_obj:
-            if PRIVATE_STORE_ID != 0:
-                try: await context.bot.forward_message(PRIVATE_STORE_ID, msg.chat_id, msg.message_id)
-                except: pass
-            
-            file_name = getattr(file_obj, 'file_name', '')
-            caption = msg.caption or ""
-            file_type = 'document' if msg.document else 'video' if msg.video else 'audio' if msg.audio else 'photo'
-            
-            file_data = {
-                "file_id": file_obj.file_id, 
-                "file_size": getattr(file_obj, 'file_size', 0), 
-                "file_type": file_type, 
-                "caption": caption,
-                "file_name": file_name
-            }
-            saved_files.append(file_data)
-            global_files_col.insert_one(file_data)
-            
-    backup_queues[user_id] = saved_files
-    await message.reply_text("✅ Batch & Search Index updated! Now send /getlink command.")
-
-async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user:
-        return
-    user_id = update.effective_user.id
-    if user_id in ADMIN_IDS:
-        if user_id not in user_queues: user_queues[user_id] = []
-        user_queues[user_id].append(update.message)
-        if user_id in processing_tasks: processing_tasks[user_id].cancel()
-        processing_tasks[user_id] = asyncio.create_task(process_batch_queue(user_id, context, update.message))
-    else:
-        if update.message and update.message.photo:
-            await handle_user_screenshot(update, context)
-
-def extract_ep_number(file_item):
-    text_to_check = f"{file_item.get('caption', '')} {file_item.get('file_name', '')}"
-    match = re.search(r'(?:ep|episode)?\s*[_.-]?\s*(\d+)', text_to_check, re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-    return None
-
-# =========================================================================
-# GETLINK: 5 ऑडियो + 1 फोटो को एक साथ बैच में बांधने का ऑटोमैटिक लॉजिक
-# =========================================================================
 async def get_link_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS: return
-    if user_id not in backup_queues or not backup_queues[user_id]: 
-        await update.message.reply_text("❌ कोई फाइल्स कतार में नहीं मिलीं!")
-        return
-    
-    all_items = backup_queues[user_id]
-    
-    # फाइलों में से ऑडियो और फोटो को क्रम से अलग करें
-    audio_files = [f for f in all_items if f['file_type'] in ['audio', 'document']]
-    photo_files = [f for f in all_items if f['file_type'] == 'photo']
-    
-    if not audio_files:
-        await update.message.reply_text("❌ कतार में कोई ऑडियो फाइल्स नहीं मिलीं!")
+    if user_id not in user_queues or not user_queues[user_id]:
+        await update.message.reply_text("❌ आपकी कतार (Queue) में कोई फाइल्स नहीं हैं। कृपया पहले फाइल्स भेजें।")
         return
 
-    CHUNK_SIZE = 5
-    audio_chunks = [audio_files[i:i + CHUNK_SIZE] for i in range(0, len(audio_files), CHUNK_SIZE)]
-    
-    active_db, active_name = get_active_file_db()
+    # यूजर से बैच साइज चुनने के लिए 4 बटन
+    buttons = [
+        [
+            InlineKeyboardButton("📦 6 फाइल्स (1 Photo + 5 Audio)", callback_data="set_batch_6"),
+            InlineKeyboardButton("📦 11 फाइल्स (1 Photo + 10 Audio)", callback_data="set_batch_11")
+        ],
+        [
+            InlineKeyboardButton("📦 16 फाइल्स (1 Photo + 15 Audio)", callback_data="set_batch_16"),
+            InlineKeyboardButton("📦 21 फाइल्स (1 Photo + 20 Audio)", callback_data="set_batch_21")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text("👇 **कृपया चुनें कि प्रति लिंक कितने फाइल्स का बैच बनाना है:**", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def process_batch_generation(message, context, user_id, chunk_size):
+    queue = user_queues.pop(user_id, [])
+    if not queue:
+        await message.reply_text("❌ कोई फाइल्स नहीं मिलीं!")
+        return
+
+    photo_files = [f for f in queue if f.get('file_type') == 'photo']
+    audio_files = [f for f in queue if f.get('file_type') != 'photo']
+
+    if not audio_files:
+        audio_files = photo_files
+        photo_files = []
+
     bot_info = await context.bot.get_me()
+    active_db, active_name = get_active_file_db()
     
     response_lines = []
     base_counter = 1
 
-    for idx, chunk in enumerate(audio_chunks):
-        # 5 ऑडियो के साथ उसी क्रम की एक फोटो जोड़ें
+    for idx, i in enumerate(range(0, len(audio_files), chunk_size)):
+        chunk = audio_files[i:i + chunk_size]
         batch_files = []
-        if idx < len(photo_files):
+        if photo_files and idx < len(photo_files):
             batch_files.append(photo_files[idx])
         batch_files.extend(chunk)
 
-        # केवल ऑडियो फाइलों से ही शुरुआती और आखिरी एपिसोड नंबर निकालें
         start_ep = extract_ep_number(chunk[0])
         end_ep = extract_ep_number(chunk[-1])
         
@@ -682,7 +524,6 @@ async def get_link_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         batch_key = f"batch_{int(time.time())}_{idx+1}"
         
-        # डेटाबेस में फोटो + 5 ऑडियो का पूरा बैच सेव करें
         active_db['file_batches'].insert_one({
             "batch_key": batch_key, 
             "files": batch_files, 
@@ -702,12 +543,168 @@ async def get_link_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(final_output) > 4000:
         for i in range(0, len(response_lines), 10):
             batch_part = "\n\n".join(response_lines[i:i + 10])
-            await update.message.reply_text(batch_part, disable_web_page_preview=True)
+            await message.reply_text(batch_part, disable_web_page_preview=True)
     else:
-        await update.message.reply_text(final_output, disable_web_page_preview=True)
+        await message.reply_text(final_output, disable_web_page_preview=True)
+
+async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        if update.message.photo:
+            await handle_user_screenshot(update, context)
+        return
+
+    file_obj = None
+    file_type = None
+    file_name = ""
+    file_size = 0
+    caption = update.message.caption or ""
+
+    if update.message.photo:
+        file_obj = update.message.photo[-1]
+        file_type = "photo"
+    elif update.message.audio:
+        file_obj = update.message.audio
+        file_type = "audio"
+        file_name = file_obj.file_name or ""
+    elif update.message.document:
+        file_obj = update.message.document
+        file_type = "document"
+        file_name = file_obj.file_name or ""
+    elif update.message.video:
+        file_obj = update.message.video
+        file_type = "video"
+        file_name = file_obj.file_name or ""
+
+    if file_obj:
+        file_size = getattr(file_obj, 'file_size', 0)
+        file_item = {
+            "file_id": file_obj.file_id,
+            "file_type": file_type,
+            "file_name": file_name,
+            "file_size": file_size,
+            "caption": caption
+        }
+
+        if user_id not in user_queues:
+            user_queues[user_id] = []
+        user_queues[user_id].append(file_item)
+
+async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    if len(text) < 3:
+        return
+
+    if not has_active_pass(user_id):
+        is_allowed, remaining_time = check_and_update_free_access(user_id)
+        if not is_allowed:
+            msg, markup = get_cooldown_message(remaining_time, update.effective_user.first_name)
+            await update.message.reply_text(msg, reply_markup=markup)
+            return
+
+    search_msg = await update.message.reply_text("🔍 फाइल खोजी जा रही है...")
+    results = list(global_files_col.find({"caption": {"$regex": text, "$options": "i"}}).limit(5))
+
+    if not results:
+        await search_msg.edit_text("❌ कोई फाइल नहीं मिली!")
+        return
+
+    await search_msg.delete()
+    for res in results:
+        await context.bot.copy_message(
+            chat_id=update.message.chat_id,
+            from_chat_id=res['chat_id'],
+            message_id=res['message_id']
+        )
+
+async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_query=None):
+    user = direct_query.from_user if direct_query else update.effective_user
+    user_data = user_col.find_one({"user_id": user.id})
+    pass_validity = user_data.get("pass_validity", 0) if user_data else 0
+
+    if pass_validity > time.time():
+        exp_date = datetime.fromtimestamp(pass_validity, ZoneInfo("Asia/Kolkata")).strftime('%d/%m/%Y | %I:%M %p')
+        status = f"✅ एक्टिव (समाप्ति: {exp_date})"
+    else:
+        status = "❌ कोई एक्टिव पास नहीं"
+
+    profile_text = (
+        f"👤 **यूजर प्रोफाइल**\n\n"
+        f"नाम: {user.first_name}\n"
+        f"आईडी: `{user.id}`\n"
+        f"पास स्थिति: {status}"
+    )
+
+    if direct_query:
+        await direct_query.message.reply_text(profile_text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(profile_text, parse_mode="Markdown")
+
+async def check_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    logs = list(history_col.find().sort("time", -1).limit(10))
+    msg = "📋 **हाल के लॉग्स:**\n\n"
+    for l in logs:
+        msg += f"• `{l.get('time')}`: {l.get('first_name')} -> {l.get('action')}\n"
+    await update.message.reply_text(msg if logs else "कोई लॉग नहीं मिला।", parse_mode="Markdown")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    u_count = user_col.count_documents({})
+    tx_count = transactions_col.count_documents({"status": "success"})
+    await update.message.reply_text(f"📊 **बॉट आंकड़े:**\n\nकुल यूजर्स: {u_count}\nसफल लेनदेन: {tx_count}", parse_mode="Markdown")
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not context.args:
+        await update.message.reply_text("उपयोग: /broadcast <संदेश>")
+        return
+    msg_text = " ".join(context.args)
+    users = user_col.find({})
+    count = 0
+    for u in users:
+        try:
+            await context.bot.send_message(chat_id=u["user_id"], text=msg_text)
+            count += 1
+            await asyncio.sleep(0.05)
+        except Exception: pass
+    await update.message.reply_text(f"✅ संदेश {count} यूजर्स को भेजा गया।")
+
+async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    if len(context.args) < 2:
+        await update.message.reply_text("उपयोग: /addchannel <channel_id> <invite_link>")
+        return
+    fsub_col.insert_one({"channel_id": int(context.args[0]), "invite_link": context.args[1], "title": "Join Channel"})
+    await update.message.reply_text("✅ चैनल जोड़ दिया गया।")
+
+async def del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not context.args:
+        await update.message.reply_text("उपयोग: /delchannel <channel_id>")
+        return
+    fsub_col.delete_one({"channel_id": int(context.args[0])})
+    await update.message.reply_text("🗑 चैनल हटा दिया गया।")
+
+async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    channels = list(fsub_col.find())
+    msg = "📢 **चैनल्स की सूची:**\n\n"
+    for c in channels:
+        msg += f"• `{c['channel_id']}`: {c['invite_link']}\n"
+    await update.message.reply_text(msg if channels else "कोई चैनल सेट नहीं है।", parse_mode="Markdown")
 
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try: join_req_col.update_one({"user_id": update.chat_join_request.from_user.id, "channel_id": update.chat_join_request.chat.id}, {"$set": {"status": "requested", "time": time.time()}}, upsert=True)
+    try: 
+        join_req_col.update_one(
+            {"user_id": update.chat_join_request.from_user.id, "channel_id": update.chat_join_request.chat.id}, 
+            {"$set": {"status": "requested", "time": time.time()}}, 
+            upsert=True
+        )
     except: pass
 
 def main():
