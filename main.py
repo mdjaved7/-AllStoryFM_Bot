@@ -636,7 +636,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     search_msg = await update.message.reply_text("🔍 फाइल खोजी जा रही है...")
     results = list(global_files_col.find({"caption": {"$regex": text, "$options": "i"}}).limit(5))
 
-    if not results:
+                        if not results:
         await search_msg.edit_text("❌ कोई फाइल नहीं मिली!")
         return
 
@@ -648,8 +648,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 from_chat_id=res['chat_id'],
                 message_id=res['message_id']
             )
-            except Exception:
-         pass
+        except Exception:
+            pass
 
     registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
     
@@ -700,7 +700,6 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
     if file_obj:
         stored_msg_id = None
 
-        
         # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             while True:
