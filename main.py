@@ -598,23 +598,23 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
                 print(f"Error saving to private store: {e}")
 
 
-        file_size = getattr(file_obj, 'file_size', 0)
-        file_item = {
-            "file_id": file_obj.file_id,
-            "file_type": file_type,
-            "file_name": file_name,
-            "file_size": file_size,
-            "caption": caption,
-            "channel_message_id": stored_msg_id
-        }
+            file_size = getattr(file_obj, 'file_size', 0)
+    file_item = {
+        "file_id": file_obj.file_id,
+        "file_type": file_type,
+        "file_name": file_name,
+        "file_size": file_size,
+        "caption": caption,
+        "channel_message_id": stored_msg_id
+    }
 
-                if user_id not in user_queues:
-            user_queues[user_id] = []
-        user_queues[user_id].append(file_item)
-        
-        await update.message.reply_text(
-            "✅ Batch stored! Now send /getlink command to get the shareable batch link."
-        )
+    if user_id not in user_queues:
+        user_queues[user_id] = []
+    user_queues[user_id].append(file_item)
+    
+    await update.message.reply_text(
+        "✅ Batch stored! Now send /getlink command to get the shareable batch link."
+    )
 
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -625,7 +625,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     if len(text) < 3:
         return
-
 
     if not has_active_pass(user_id):
         is_allowed, remaining_time = check_and_update_free_access(user_id)
@@ -649,7 +648,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 from_chat_id=res['chat_id'],
                 message_id=res['message_id']
             )
-        except Exception: pass
+        except Exception:
+            pass
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, direct_query=None):
     user = direct_query.from_user if direct_query else update.effective_user
@@ -675,7 +675,8 @@ async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, direc
         await update.message.reply_text(profile_text, parse_mode="Markdown")
 
 async def check_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     logs = list(history_col.find().sort("time", -1).limit(10))
     msg = "📋 **हाल के लॉग्स:**\n\n"
     for l in logs:
@@ -683,13 +684,15 @@ async def check_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg if logs else "कोई लॉग नहीं मिला।", parse_mode="Markdown")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     u_count = user_col.count_documents({})
     tx_count = transactions_col.count_documents({"status": "success"})
     await update.message.reply_text(f"📊 **बॉट आंकड़े:**\n\nकुल यूजर्स: {u_count}\nसफल लेनदेन: {tx_count}", parse_mode="Markdown")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     if not context.args:
         await update.message.reply_text("उपयोग: /broadcast <संदेश>")
         return
@@ -701,11 +704,13 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=u["user_id"], text=msg_text)
             count += 1
             await asyncio.sleep(0.05)
-        except Exception: pass
+        except Exception:
+            pass
     await update.message.reply_text(f"✅ संदेश {count} यूजर्स को भेजा गया।")
 
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     if len(context.args) < 2:
         await update.message.reply_text("उपयोग: /addchannel <channel_id> <invite_link>")
         return
@@ -713,7 +718,8 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ चैनल जोड़ दिया गया।")
 
 async def del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     if not context.args:
         await update.message.reply_text("उपयोग: /delchannel <channel_id>")
         return
@@ -721,7 +727,8 @@ async def del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🗑 चैनल हटा दिया गया।")
 
 async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     channels = list(fsub_col.find())
     msg = "📢 **चैनल्स की सूची:**\n\n"
     for c in channels:
@@ -735,7 +742,8 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"$set": {"status": "requested", "time": time.time()}}, 
             upsert=True
         )
-    except: pass
+    except:
+        pass
 
 def main():
     request_kwargs = HTTPXRequest(connect_timeout=20.0, read_timeout=20.0)
