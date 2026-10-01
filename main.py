@@ -587,7 +587,7 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
         if PRIVATE_STORE_ID != 0:
             try:
                 # Telegram flood wait se bachne ke liye chota delay
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(5.0)
                 
                 # Bina forwarded tag ke save karne ke liye:
                 stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
