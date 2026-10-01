@@ -608,9 +608,14 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
             "channel_message_id": stored_msg_id
         }
 
-        if user_id not in user_queues:
+                if user_id not in user_queues:
             user_queues[user_id] = []
         user_queues[user_id].append(file_item)
+        
+        await update.message.reply_text(
+            "✅ Batch stored! Now send /getlink command to get the shareable batch link."
+        )
+
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -620,6 +625,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     if len(text) < 3:
         return
+
 
     if not has_active_pass(user_id):
         is_allowed, remaining_time = check_and_update_free_access(user_id)
