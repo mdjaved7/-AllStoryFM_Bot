@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import FloodWait
+from telegram.error import RetryAfter
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
@@ -592,8 +592,8 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
                     stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                     stored_msg_id = stored_msg.message_id
                     break
-                except FloodWait as e:
-                    print(f"FloodWait error: Sleeping for {e.retry_after} seconds...")
+                except RetryAfter as e:
+                    print(f"RetryAfter error: Sleeping for {e.retry_after} seconds...")
                     await asyncio.sleep(e.retry_after + 1)
                 except Exception as e:
                     err_str = str(e)
