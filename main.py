@@ -648,27 +648,26 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 from_chat_id=res['chat_id'],
                 message_id=res['message_id']
             )
-        except Exception:
-import re
-from telegram.error import FloodWait
+                except Exception:
+            pass
 
-registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
-        
-link = f"https://t.me/{bot_info.username}?start={batch_key}"
-line = f"✅ 🇮🇳 Hindi Ep {start_ep} x {end_ep} - {link}"
-response_lines.append(line)
-await asyncio.sleep(0.05)
+    registry_col.insert_one({"batch_key": batch_key, "db_name": active_name})
+    
+    link = f"https://t.me/{bot_info.username}?start={batch_key}"
+    line = f"✅ 🇮🇳 Hindi Ep {start_ep} x {end_ep} - {link}"
+    response_lines.append(line)
+    await asyncio.sleep(0.05)
 
-backup_queues.pop(user_id, None)
+    backup_queues.pop(user_id, None)
 
-final_output = "\n\n".join(response_lines)
+    final_output = "\n\n".join(response_lines)
 
-if len(final_output) > 4000:
-    for i in range(0, len(response_lines), 10):
-        batch_part = "\n\n".join(response_lines[i:i + 10])
-        await message.reply_text(batch_part, disable_web_page_preview=True)
-else:
-    await message.reply_text(final_output, disable_web_page_preview=True)
+    if len(final_output) > 4000:
+        for i in range(0, len(response_lines), 10):
+            batch_part = "\n\n".join(response_lines[i:i + 10])
+            await message.reply_text(batch_part, disable_web_page_preview=True)
+    else:
+        await message.reply_text(final_output, disable_web_page_preview=True)
 
 async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -700,12 +699,13 @@ async def handle_incoming_files(update: Update, context: ContextTypes.DEFAULT_TY
 
     if file_obj:
         stored_msg_id = None
+
         
         # --- PRIVATE STORE CHANNEL MEIN FORWARD / SAVE KARNA ---
         if PRIVATE_STORE_ID != 0:
             while True:
                 try:
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.5)
                     stored_msg = await update.message.copy(chat_id=PRIVATE_STORE_ID)
                     stored_msg_id = stored_msg.message_id
                     break
